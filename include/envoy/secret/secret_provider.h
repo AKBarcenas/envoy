@@ -47,6 +47,8 @@ using TlsCertificatePtr =
     std::unique_ptr<envoy::extensions::transport_sockets::tls::v3::TlsCertificate>;
 using CertificateValidationContextPtr =
     std::unique_ptr<envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext>;
+using CertificateValidationContextRemoteCrlPtr =
+    std::unique_ptr<envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl>;    
 using TlsSessionTicketKeysPtr =
     std::unique_ptr<envoy::extensions::transport_sockets::tls::v3::TlsSessionTicketKeys>;
 using GenericSecretPtr =
@@ -55,6 +57,11 @@ using GenericSecretPtr =
 using TlsCertificateConfigProvider =
     SecretProvider<envoy::extensions::transport_sockets::tls::v3::TlsCertificate>;
 using TlsCertificateConfigProviderSharedPtr = std::shared_ptr<TlsCertificateConfigProvider>;
+
+using CertificateValidationContextRemoteCrlConfigProvider =
+    SecretProvider<envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl>;
+using CertificateValidationContextRemoteCrlConfigProviderSharedPtr =
+    std::shared_ptr<CertificateValidationContextRemoteCrlConfigProvider>;
 
 using CertificateValidationContextConfigProvider =
     SecretProvider<envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext>;

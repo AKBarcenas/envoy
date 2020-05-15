@@ -14,7 +14,8 @@ class CertificateValidationContextConfigImpl : public CertificateValidationConte
 public:
   CertificateValidationContextConfigImpl(
       const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext& config,
-      Api::Api& api);
+      Api::Api& api,
+      const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl& remote_crl);
 
   const std::string& caCert() const override { return ca_cert_; }
   const std::string& caCertPath() const override { return ca_cert_path_; }

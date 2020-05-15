@@ -167,29 +167,33 @@ ContextConfigImpl::ContextConfigImpl(
       max_protocol_version_(tlsVersionFromProto(config.tls_params().tls_maximum_protocol_version(),
                                                 default_max_protocol_version)) {
   if (certificate_validation_context_provider_ != nullptr) {
-    if (default_cvc_) {
-      // We need to validate combined certificate validation context.
-      // The default certificate validation context and dynamic certificate validation
-      // context could only contain partial fields, which is okay to fail the validation.
-      // But the combined certificate validation context should pass validation. If
-      // validation of combined certificate validation context fails,
-      // getCombinedValidationContextConfig() throws exception, validation_context_config_ will not
-      // get updated.
-      cvc_validation_callback_handle_ =
-          certificate_validation_context_provider_->addValidationCallback(
-              [this](
-                  const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext&
-                      dynamic_cvc) { getCombinedValidationContextConfig(dynamic_cvc); });
+    if (certificate_validation_context_remote_crl_provider_->secret() != nullptr) {
+      if (default_cvc_) {
+        // We need to validate combined certificate validation context.
+        // The default certificate validation context and dynamic certificate validation
+        // context could only contain partial fields, which is okay to fail the validation.
+        // But the combined certificate validation context should pass validation. If
+        // validation of combined certificate validation context fails,
+        // getCombinedValidationContextConfig() throws exception, validation_context_config_ will not
+        // get updated.
+        cvc_validation_callback_handle_ =
+            certificate_validation_context_provider_->addValidationCallback(
+                [this](
+                    const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext&
+                        dynamic_cvc) { getCombinedValidationContextConfig(dynamic_cvc, *certificate_validation_context_remote_crl_provider_->secret()); });
+      }
     }
     // Load inlined, static or dynamic secret that's already available.
     if (certificate_validation_context_provider_->secret() != nullptr) {
-      if (default_cvc_) {
-        validation_context_config_ =
-            getCombinedValidationContextConfig(*certificate_validation_context_provider_->secret());
-      } else {
-        validation_context_config_ = std::make_unique<Ssl::CertificateValidationContextConfigImpl>(
-            *certificate_validation_context_provider_->secret(), api_);
-      }
+      if (certificate_validation_context_remote_crl_provider_->secret() != nullptr) {
+        if (default_cvc_) {
+          validation_context_config_ =
+            getCombinedValidationContextConfig(*certificate_validation_context_provider_->secret(), *certificate_validation_context_remote_crl_provider_->secret());
+        } else {
+          validation_context_config_ = std::make_unique<Ssl::CertificateValidationContextConfigImpl>(
+            *certificate_validation_context_provider_->secret(), api_, *certificate_validation_context_remote_crl_provider_->secret());
+        }
+      } 
     }
   }
   // Load inlined, static or dynamic secrets that are already available.
@@ -204,11 +208,13 @@ ContextConfigImpl::ContextConfigImpl(
 
 Ssl::CertificateValidationContextConfigPtr ContextConfigImpl::getCombinedValidationContextConfig(
     const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext&
-        dynamic_cvc) {
+        dynamic_cvc,
+    const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl&
+        remote_crl) {
   envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext combined_cvc =
       *default_cvc_;
   combined_cvc.MergeFrom(dynamic_cvc);
-  return std::make_unique<Envoy::Ssl::CertificateValidationContextConfigImpl>(combined_cvc, api_);
+  return std::make_unique<Envoy::Ssl::CertificateValidationContextConfigImpl>(combined_cvc, api_, remote_crl);
 }
 
 void ContextConfigImpl::setSecretUpdateCallback(std::function<void()> callback) {
@@ -240,7 +246,7 @@ void ContextConfigImpl::setSecretUpdateCallback(std::function<void()> callback) 
       cvc_update_callback_handle_ =
           certificate_validation_context_provider_->addUpdateCallback([this, callback]() {
             validation_context_config_ = getCombinedValidationContextConfig(
-                *certificate_validation_context_provider_->secret());
+                *certificate_validation_context_provider_->secret(), *certificate_validation_context_remote_crl_provider_->secret());
             callback();
           });
     } else {
@@ -250,7 +256,7 @@ void ContextConfigImpl::setSecretUpdateCallback(std::function<void()> callback) 
           certificate_validation_context_provider_->addUpdateCallback([this, callback]() {
             validation_context_config_ =
                 std::make_unique<Ssl::CertificateValidationContextConfigImpl>(
-                    *certificate_validation_context_provider_->secret(), api_);
+                    *certificate_validation_context_provider_->secret(), api_, *certificate_validation_context_remote_crl_provider_->secret());
             callback();
           });
     }

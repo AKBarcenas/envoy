@@ -21,6 +21,7 @@
 
 #include "common/common/callback_impl.h"
 #include "common/common/cleanup.h"
+#include "common/config/datasource.h"
 #include "common/config/utility.h"
 #include "common/init/target_impl.h"
 #include "common/ssl/certificate_validation_context_config_impl.h"
@@ -86,11 +87,14 @@ private:
 
 class TlsCertificateSdsApi;
 class CertificateValidationContextSdsApi;
+class CertificateValidationContextRemoteCrlSdsApi;
 class TlsSessionTicketKeysSdsApi;
 class GenericSecretSdsApi;
 using TlsCertificateSdsApiSharedPtr = std::shared_ptr<TlsCertificateSdsApi>;
 using CertificateValidationContextSdsApiSharedPtr =
     std::shared_ptr<CertificateValidationContextSdsApi>;
+using CertificateValidationContextRemoteCrlSdsApiSharedPtr =
+    std::shared_ptr<CertificateValidationContextRemoteCrlSdsApi>;
 using TlsSessionTicketKeysSdsApiSharedPtr = std::shared_ptr<TlsSessionTicketKeysSdsApi>;
 using GenericSecretSdsApiSharedPtr = std::shared_ptr<GenericSecretSdsApi>;
 
@@ -215,6 +219,99 @@ private:
   CertificateValidationContextPtr certificate_validation_context_secrets_;
   Common::CallbackManager<
       const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext&>
+      validation_callback_manager_;
+};
+
+/**
+ * CertificateValidationContextSdsApi implementation maintains and updates dynamic certificate
+ * validation context secrets.
+ */
+class CertificateValidationContextRemoteCrlSdsApi
+    : public SdsApi,
+      public CertificateValidationContextRemoteCrlConfigProvider {
+public:
+  static CertificateValidationContextRemoteCrlSdsApiSharedPtr
+  create(Server::Configuration::TransportSocketFactoryContext& secret_provider_context,
+         const envoy::config::core::v3::ConfigSource& sds_config,
+         const std::string& sds_config_name, std::function<void()> destructor_cb) {
+    // We need to do this early as we invoke the subscription factory during initialization, which
+    // is too late to throw.
+    Config::Utility::checkLocalInfo("CertificateValidationContextRemoteCrlSdsApi",
+                                    secret_provider_context.localInfo());
+    return std::make_shared<CertificateValidationContextRemoteCrlSdsApi>(
+        sds_config, sds_config_name, secret_provider_context.clusterManager().subscriptionFactory(),
+        secret_provider_context.dispatcher().timeSource(),
+        secret_provider_context.messageValidationVisitor(), secret_provider_context.stats(),
+        *secret_provider_context.initManager(), destructor_cb, secret_provider_context);
+  }
+
+  CertificateValidationContextRemoteCrlSdsApi(const envoy::config::core::v3::ConfigSource& sds_config,
+                                     const std::string& sds_config_name,
+                                     Config::SubscriptionFactory& subscription_factory,
+                                     TimeSource& time_source,
+                                     ProtobufMessage::ValidationVisitor& validation_visitor,
+                                     Stats::Store& stats, Init::Manager& init_manager,
+                                     std::function<void()> destructor_cb,
+                                     Server::Configuration::TransportSocketFactoryContext& secret_provider_context)
+      : SdsApi(sds_config, sds_config_name, subscription_factory, time_source, validation_visitor,
+               stats, init_manager, std::move(destructor_cb)), crl_secret_provider_context(secret_provider_context) {}
+
+  // SecretProvider
+  const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl*
+  secret() const override {
+    if (certificate_validation_context_remote_crl_secrets_.get()->remote_crl_data().empty()) {
+      return nullptr;
+    }
+    return certificate_validation_context_remote_crl_secrets_.get();
+  }
+  Common::CallbackHandle* addUpdateCallback(std::function<void()> callback) override {
+    if (secret()) {
+      callback();
+    }
+    return update_callback_manager_.add(callback);
+  }
+
+  Common::CallbackHandle* addValidationCallback(
+      std::function<
+          void(const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl&)>
+          callback) override {
+    return validation_callback_manager_.add(callback);
+  }
+
+protected:
+  void setSecret(const envoy::extensions::transport_sockets::tls::v3::Secret& secret) override {
+    generateRemoteCrlData(secret.remote_crl());
+    certificate_validation_context_remote_crl_secrets_ =
+        std::make_unique<envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl>(
+            secret.remote_crl());
+  }
+
+  void generateRemoteCrlData(envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl remote_crl) {
+    envoy::config::core::v3::RemoteDataSource source = envoy::config::core::v3::RemoteDataSource();
+
+    std::string uri ("A character sequence");
+    std::string sha256 ("A character sequence");
+
+    source.mutable_http_uri()->set_uri(uri);
+    source.set_sha256(sha256);
+
+    Config::DataSource::RemoteAsyncDataProviderPtr remote_data_provider_ = std::make_unique<Config::DataSource::RemoteAsyncDataProvider>(
+      crl_secret_provider_context.clusterManager(), *(crl_secret_provider_context.initManager()), source, crl_secret_provider_context.dispatcher(), crl_secret_provider_context.random(), true,
+      [&](const std::string& data) {
+        remote_crl.set_remote_crl_data(data);
+      });
+  }
+
+  void
+  validateConfig(const envoy::extensions::transport_sockets::tls::v3::Secret& secret) override {
+    validation_callback_manager_.runCallbacks(secret.remote_crl());
+  }
+
+private:
+  CertificateValidationContextRemoteCrlPtr certificate_validation_context_remote_crl_secrets_;
+  Server::Configuration::TransportSocketFactoryContext& crl_secret_provider_context;
+  Common::CallbackManager<
+      const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl&>
       validation_callback_manager_;
 };
 

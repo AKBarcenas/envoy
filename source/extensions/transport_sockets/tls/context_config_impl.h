@@ -58,7 +58,9 @@ public:
 
   Ssl::CertificateValidationContextConfigPtr getCombinedValidationContextConfig(
       const envoy::extensions::transport_sockets::tls::v3::CertificateValidationContext&
-          dynamic_cvc);
+          dynamic_cvc,
+      const envoy::extensions::transport_sockets::tls::v3::ValidationContextRemoteCrl&
+          remote_crl);
 
 protected:
   ContextConfigImpl(const envoy::extensions::transport_sockets::tls::v3::CommonTlsContext& config,
@@ -89,6 +91,9 @@ private:
   Envoy::Common::CallbackHandle* tc_update_callback_handle_{};
   Secret::CertificateValidationContextConfigProviderSharedPtr
       certificate_validation_context_provider_;
+  // Provides the secret once it has been populated.    
+  Secret::CertificateValidationContextRemoteCrlConfigProviderSharedPtr
+      certificate_validation_context_remote_crl_provider_;      
   // Handle for certificate validation context dynamic secret callback.
   Envoy::Common::CallbackHandle* cvc_update_callback_handle_{};
   Envoy::Common::CallbackHandle* cvc_validation_callback_handle_{};
